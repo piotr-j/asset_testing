@@ -1,16 +1,19 @@
 package io.piotrjastrzebski;
 
 import com.artemis.*;
+import com.artemis.annotations.Wire;
+import com.artemis.systems.IteratingSystem;
 import com.artemis.utils.IntBag;
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.Animation;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
+import com.badlogic.gdx.graphics.g2d.TextureAtlas;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.utils.Array;
-
-import java.util.Comparator;
 
 /**
  * We want to figure out this renderable bullshit
@@ -56,25 +59,96 @@ import java.util.Comparator;
  *  facing
  *  	region
  *  	region
+ *
+ *  {
+ *     region: {
+ *       // some extra offsets or whatever
+ *      	path: entities:rwelp
+ *     }
+ *  }
+ *  {
+ *  	// all regions same size
+ *    facing: [
+ *    	{
+ *    	 	min:0.max:180
+ *    	   region: {
+ *    	     	path: entities:path
+ *    	   }
+ *    	},{
+ *				// ...
+ *    	}
+ *    ]
+ *  }
+ *  {
+ *     // all regions same size
+ *     facing: [
+ *    	{
+ *    	 	min:0.max:180
+ *    	   animation: {
+	*    		 	frame: 0.16
+	*    		 	// automatic animation from texture atlas with given name, atlas.findRegions(name)
+	*    		  	path: entities:awelp_f1
+	*    		 }
+ *    	},{
+ *				// ...
+ *    	}
+ *    ]
+ *  }
+ *  {
+ *  	 // all regions same size
+ *     animation: {
+ *     	frame: 0.16
+ *     	// automatic animation from texture atlas with given name, atlas.findRegions(name)
+ *      	path: entities:awelp
+ *     }
+ *  }
+ *  {
+ *     region: {
+*    	    path: entities:rath
+*    	 }
+ *  }
  */
 public class MyGdxGame extends ApplicationAdapter {
 
+	public static class Asset extends Component {
+
+	}
+
 	public static class Facing extends Component {
-		Animation af1;
-		Animation af2;
-		Region rf1;
-		Region rf2;
+		public Array<Direction> facings = new Array<Direction>();
+		public float angle;
+
+		public static class Direction {
+			public float min;
+			public float max;
+			public Asset asset;
+		}
 	}
 
-	public static class Animation extends Component {
-		public com.badlogic.gdx.graphics.g2d.Animation<TextureRegion> animation;
+	public static class Tint extends Component {
+		public Color color = new Color(Color.WHITE);
 	}
 
-	public static class Region extends Component {
+	public static class Animation extends Asset {
+		public com.badlogic.gdx.graphics.g2d.Animation<Region> animation;
+		public float time;
+
+		public Asset init (com.badlogic.gdx.graphics.g2d.Animation<Region> animation) {
+			this.animation = animation;
+			return this;
+		}
+	}
+
+	public static class Region extends Asset {
 		public TextureRegion region;
+
+		public Region init (TextureRegion region) {
+			this.region = region;
+			return this;
+		}
 	}
 
-	public static class Spine extends Component {
+	public static class Spine extends Asset {
 		// TODO
 	}
 
@@ -84,53 +158,149 @@ public class MyGdxGame extends ApplicationAdapter {
 	World world;
 	protected ComponentMapper<Renderable> mRenderable;
 	protected ComponentMapper<Animation> mAnimation;
+	protected ComponentMapper<Facing> mFacing;
+	protected ComponentMapper<Region> mRegion;
+	TextureAtlas atlas;
 	@Override
 	public void create () {
 		batch = new SpriteBatch();
+		atlas = new TextureAtlas(Gdx.files.internal("chars.atlas"));
 
 		WorldConfiguration config = new WorldConfiguration();
 		config.register(batch);
 
 		Renderer renderer = new Renderer();
+		config.setSystem(new IteratingSystem(Aspect.all(Facing.class)) {
+			protected ComponentMapper<Facing> mFacing;
+			@Override protected void process (int entityId) {
+				Facing facing = mFacing.get(entityId);
+				facing.angle += world.delta * 90;
+				if (facing.angle > 360) facing.angle -= 360;
+				for (Facing.Direction direction : facing.facings) {
+					if (direction.min <= facing.angle && direction.max > facing.angle) {
+						ArtemisUtils.addComponent(entityId, direction.asset);
+					}
+				}
+			}
+		});
+		config.setSystem(new IteratingSystem(Aspect.all(Animation.class)) {
+			protected ComponentMapper<Animation> mAnimation;
+			@Override protected void process (int entityId) {
+				Animation animation = mAnimation.get(entityId);
+				animation.time += world.delta;
+				ArtemisUtils.addComponent(entityId, animation.animation.getKeyFrame(animation.time, true));
+			}
+		});
 		config.setSystem(renderer);
 
 		world = new World(config);
 		world.inject(this, false);
+		ArtemisUtils.world = world;
 
 		renderer.addSubRenderer(new RegionRenderer());
-		Renderer.PreProcessor animationPreprocessor;
-		renderer.addPreprocessor(animationPreprocessor = new Renderer.PreProcessor() {
-			protected ComponentMapper<Animation> mAnimation;
-			protected ComponentMapper<Region> mRegion;
-			@Override public boolean accept (int entityId) {
-				return mAnimation.has(entityId) && mRegion.has(entityId);
-			}
-
-			@Override public void process (int entityId) {
-				Animation animation = mAnimation.get(entityId);
-				Region region = mRegion.get(entityId);
-				//region.region = animation.animation.getKeyFrame(0);
-				Gdx.app.log("Animations", "Process " + entityId);
-			}
-
-			@Override public int priority () {
-				return 0;
-			}
-		});
+//		Renderer.PreProcessor animationPreprocessor;
+//		renderer.addPreprocessor(animationPreprocessor = new Renderer.PreProcessor() {
+//			protected ComponentMapper<Animation> mAnimation;
+//			protected ComponentMapper<Region> mRegion;
+//			@Override public boolean accept (int entityId) {
+//				return mAnimation.has(entityId) && mRegion.has(entityId);
+//			}
+//
+//			@Override public void process (int entityId) {
+//				Animation animation = mAnimation.get(entityId);
+//				Region frame = animation.animation.getKeyFrame(0);
+//
+//				// replace region component
+//				ArtemisUtils.addComponent(entityId, frame);
+//				//region.region = animation.animation.getKeyFrame(0);
+//				Gdx.app.log("Animations", "Process " + entityId);
+//			}
+//
+//			@Override public int priority () {
+//				return 0;
+//			}
+//		});
 
 
 		{
 			int entityId = world.create();
 			Renderable renderable = mRenderable.create(entityId);
+			renderable.x = 0;
+			renderable.y = 0;
 			renderable.type = Renderable.TYPE_REGION;
+			mRegion.create(entityId).region = new TextureRegion(new Texture("badlogic.jpg"));
+		}
+
+		{
+			int entityId = world.create();
+			Renderable renderable = mRenderable.create(entityId);
+			renderable.x = 0;
+			renderable.y = 300;
+			renderable.type = Renderable.TYPE_REGION;
+			Facing facing = mFacing.create(entityId);
+			Facing.Direction dir1 = new Facing.Direction();
+			facing.facings.add(dir1);
+			dir1.min = 0;
+			dir1.max = 180;
+			dir1.asset = new Region().init(new TextureRegion(new Texture("badlogic.jpg")));
+
+			Facing.Direction dir2 = new Facing.Direction();
+			facing.facings.add(dir2);
+			dir2.min = 180;
+			dir2.max = 360;
+			dir2.asset = new Region().init(new TextureRegion(new Texture("badlogic.jpg")));
+			((Region)dir2.asset).region.flip(true, true);
 		}
 		{
 			int entityId = world.create();
 			Renderable renderable = mRenderable.create(entityId);
+			renderable.x = 300;
+			renderable.y = 200;
 			renderable.type = Renderable.TYPE_REGION;
-			mAnimation.create(entityId);
+			Animation animation = mAnimation.create(entityId);
+			animation.time = 0;
+			Array<TextureAtlas.AtlasRegion> atlasRegions = atlas.findRegions("char_bat/0");
+			Array<Region> regions = new Array<Region>();
+			for (TextureAtlas.AtlasRegion atlasRegion : atlasRegions) {
+				regions.add(new Region().init(atlasRegion));
+			}
 
-			renderer.register(entityId, animationPreprocessor);
+			animation.animation = new com.badlogic.gdx.graphics.g2d.Animation<Region>(1/20f, regions);
+		}
+		{
+			int entityId = world.create();
+			Renderable renderable = mRenderable.create(entityId);
+			renderable.x = 300;
+			renderable.y = 300;
+			renderable.type = Renderable.TYPE_REGION;
+			Facing facing = mFacing.create(entityId);
+			Facing.Direction dir1 = new Facing.Direction();
+			facing.facings.add(dir1);
+			dir1.min = 0;
+			dir1.max = 180;
+			{
+				Array<TextureAtlas.AtlasRegion> atlasRegions = atlas.findRegions("char_bat/90");
+				Array<Region> regions = new Array<Region>();
+				for (TextureAtlas.AtlasRegion atlasRegion : atlasRegions) {
+					regions.add(new Region().init(atlasRegion));
+				}
+
+				dir1.asset = new Animation().init(new com.badlogic.gdx.graphics.g2d.Animation<Region>(1/20f, regions));
+			}
+
+			Facing.Direction dir2 = new Facing.Direction();
+			facing.facings.add(dir2);
+			dir2.min = 180;
+			dir2.max = 360;
+			{
+				Array<TextureAtlas.AtlasRegion> atlasRegions = atlas.findRegions("char_bat/270");
+				Array<Region> regions = new Array<Region>();
+				for (TextureAtlas.AtlasRegion atlasRegion : atlasRegions) {
+					regions.add(new Region().init(atlasRegion));
+				}
+
+				dir2.asset = new Animation().init(new com.badlogic.gdx.graphics.g2d.Animation<Region>(1/20f, regions));
+			}
 		}
 	}
 
@@ -138,6 +308,7 @@ public class MyGdxGame extends ApplicationAdapter {
 	public void render () {
 		Gdx.gl.glClearColor(1, 0, 0, 1);
 		Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+		world.delta = Gdx.graphics.getDeltaTime();
 		world.process();
 	}
 
@@ -238,23 +409,28 @@ public class MyGdxGame extends ApplicationAdapter {
 
 	public static class RegionRenderer extends Renderer.SubRenderer {
 		private static final String TAG = RegionRenderer.class.getSimpleName();
+		@Wire SpriteBatch batch;
 		protected ComponentMapper<Renderable> mRenderable;
 		protected ComponentMapper<Region> mRegion;
 		@Override public void begin () {
-
+			batch.begin();
 		}
 
 		@Override public void render (int entityId) {
 			Renderable renderable = mRenderable.get(entityId);
-			Region region = mRegion.get(entityId);
+			Region rc = mRegion.get(entityId);
+			if (rc == null) return;
+			TextureRegion region = rc.region;
 			Gdx.app.log(TAG, "Render region " + entityId);
+
+			batch.draw(region, renderable.x, renderable.y, region.getRegionWidth() * .5f, region.getRegionHeight() * .5f);
 		}
 
 		@Override public void end () {
-
+			batch.end();
 		}
 	}
-	
+
 	@Override
 	public void dispose () {
 		world.dispose();
