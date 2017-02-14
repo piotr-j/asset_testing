@@ -109,7 +109,7 @@ public class MyGdxGame extends ApplicationAdapter {
 			@Override public void process (int entityId) {
 				Animation animation = mAnimation.get(entityId);
 				Region region = mRegion.get(entityId);
-				region.region = animation.animation.getKeyFrame(0);
+				//region.region = animation.animation.getKeyFrame(0);
 				Gdx.app.log("Animations", "Process " + entityId);
 			}
 
