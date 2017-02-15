@@ -9,7 +9,6 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Texture;
-import com.badlogic.gdx.graphics.g2d.Animation;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.g2d.TextureAtlas;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
@@ -22,7 +21,7 @@ import com.badlogic.gdx.utils.Array;
  * 	TextureRegion
  * 	Spine
  * Then, we can modify how they change during game play
- * 	Animation - fixed amount of frames, looped changes over time
+ * 	Animation - fixed amount of frames, looped changes over stateTime
  * 	Facing - renderable is changed based on entities facing direction
  * 	Tiled - renderable is changed based on adjacent entities of same type
  * 	Shader? - Applied to this asset
@@ -32,12 +31,12 @@ import com.badlogic.gdx.utils.Array;
  *
  * we want to be able to specify combinations, stuff has order, ie facing/tiled before animation
  *  tint?
- *  facing 		-> animation 	-> region
- *  facing 							-> region
- *  tiled 		-> animation 	-> region
- *  tiled 							-> region
- *  animation 						-> region
- *  										region
+ *  facing 		-> animation 	-> diffuse
+ *  facing 							-> diffuse
+ *  tiled 		-> animation 	-> diffuse
+ *  tiled 							-> diffuse
+ *  animation 						-> diffuse
+ *  										diffuse
  *
  *  facing -> spine
  *  tiled -> spine
@@ -45,23 +44,23 @@ import com.badlogic.gdx.utils.Array;
  *
  *  renderable
  *  	preprocessors?
- * 	asset (region/spine)
+ * 	asset (diffuse/spine)
  *    shader?
  *
  *  facing - pick stuff based on some state
  *  	animation - pick stuff based on some state
- *  		region
- *  		region
+ *  		diffuse
+ *  		diffuse
  *  	animation
- *  		region
- *  		region
+ *  		diffuse
+ *  		diffuse
  *
  *  facing
- *  	region
- *  	region
+ *  	diffuse
+ *  	diffuse
  *
  *  {
- *     region: {
+ *     diffuse: {
  *       // some extra offsets or whatever
  *      	path: entities:rwelp
  *     }
@@ -71,7 +70,7 @@ import com.badlogic.gdx.utils.Array;
  *    facing: [
  *    	{
  *    	 	min:0.max:180
- *    	   region: {
+ *    	   diffuse: {
  *    	     	path: entities:path
  *    	   }
  *    	},{
@@ -103,7 +102,7 @@ import com.badlogic.gdx.utils.Array;
  *     }
  *  }
  *  {
- *     region: {
+ *     diffuse: {
 *    	    path: entities:rath
 *    	 }
  *  }
@@ -131,7 +130,8 @@ public class MyGdxGame extends ApplicationAdapter {
 
 	public static class Animation extends Asset {
 		public com.badlogic.gdx.graphics.g2d.Animation<Region> animation;
-		public float time;
+		public float stateTime;
+		public boolean loop = true;
 
 		public Asset init (com.badlogic.gdx.graphics.g2d.Animation<Region> animation) {
 			this.animation = animation;
@@ -140,10 +140,11 @@ public class MyGdxGame extends ApplicationAdapter {
 	}
 
 	public static class Region extends Asset {
-		public TextureRegion region;
+		public TextureRegion diffuse;
+		public TextureRegion normal;
 
 		public Region init (TextureRegion region) {
-			this.region = region;
+			this.diffuse = region;
 			return this;
 		}
 	}
@@ -169,28 +170,33 @@ public class MyGdxGame extends ApplicationAdapter {
 		WorldConfiguration config = new WorldConfiguration();
 		config.register(batch);
 
-		Renderer renderer = new Renderer();
+		// order of the addition matters, not great
+		// facing updater
 		config.setSystem(new IteratingSystem(Aspect.all(Facing.class)) {
 			protected ComponentMapper<Facing> mFacing;
 			@Override protected void process (int entityId) {
 				Facing facing = mFacing.get(entityId);
+				// TODO angle from some proper place
 				facing.angle += world.delta * 90;
 				if (facing.angle > 360) facing.angle -= 360;
+				// TODO check if angle changed, with threshold?
 				for (Facing.Direction direction : facing.facings) {
 					if (direction.min <= facing.angle && direction.max > facing.angle) {
-						ArtemisUtils.addComponent(entityId, direction.asset);
+						ArtemisUtils.setComponent(entityId, direction.asset);
 					}
 				}
 			}
 		});
+		// animation updater
 		config.setSystem(new IteratingSystem(Aspect.all(Animation.class)) {
 			protected ComponentMapper<Animation> mAnimation;
 			@Override protected void process (int entityId) {
 				Animation animation = mAnimation.get(entityId);
-				animation.time += world.delta;
-				ArtemisUtils.addComponent(entityId, animation.animation.getKeyFrame(animation.time, true));
+				animation.stateTime += world.delta;
+				ArtemisUtils.setComponent(entityId, animation.animation.getKeyFrame(animation.stateTime, animation.loop));
 			}
 		});
+		Renderer renderer = new Renderer();
 		config.setSystem(renderer);
 
 		world = new World(config);
@@ -198,29 +204,6 @@ public class MyGdxGame extends ApplicationAdapter {
 		ArtemisUtils.world = world;
 
 		renderer.addSubRenderer(new RegionRenderer());
-//		Renderer.PreProcessor animationPreprocessor;
-//		renderer.addPreprocessor(animationPreprocessor = new Renderer.PreProcessor() {
-//			protected ComponentMapper<Animation> mAnimation;
-//			protected ComponentMapper<Region> mRegion;
-//			@Override public boolean accept (int entityId) {
-//				return mAnimation.has(entityId) && mRegion.has(entityId);
-//			}
-//
-//			@Override public void process (int entityId) {
-//				Animation animation = mAnimation.get(entityId);
-//				Region frame = animation.animation.getKeyFrame(0);
-//
-//				// replace region component
-//				ArtemisUtils.addComponent(entityId, frame);
-//				//region.region = animation.animation.getKeyFrame(0);
-//				Gdx.app.log("Animations", "Process " + entityId);
-//			}
-//
-//			@Override public int priority () {
-//				return 0;
-//			}
-//		});
-
 
 		{
 			int entityId = world.create();
@@ -228,7 +211,7 @@ public class MyGdxGame extends ApplicationAdapter {
 			renderable.x = 0;
 			renderable.y = 0;
 			renderable.type = Renderable.TYPE_REGION;
-			mRegion.create(entityId).region = new TextureRegion(new Texture("badlogic.jpg"));
+			mRegion.create(entityId).diffuse = new TextureRegion(new Texture("badlogic.jpg"));
 		}
 
 		{
@@ -249,7 +232,7 @@ public class MyGdxGame extends ApplicationAdapter {
 			dir2.min = 180;
 			dir2.max = 360;
 			dir2.asset = new Region().init(new TextureRegion(new Texture("badlogic.jpg")));
-			((Region)dir2.asset).region.flip(true, true);
+			((Region)dir2.asset).diffuse.flip(true, true);
 		}
 		{
 			int entityId = world.create();
@@ -258,7 +241,7 @@ public class MyGdxGame extends ApplicationAdapter {
 			renderable.y = 200;
 			renderable.type = Renderable.TYPE_REGION;
 			Animation animation = mAnimation.create(entityId);
-			animation.time = 0;
+			animation.stateTime = 0;
 			Array<TextureAtlas.AtlasRegion> atlasRegions = atlas.findRegions("char_bat/0");
 			Array<Region> regions = new Array<Region>();
 			for (TextureAtlas.AtlasRegion atlasRegion : atlasRegions) {
@@ -318,8 +301,6 @@ public class MyGdxGame extends ApplicationAdapter {
 		public float x;
 		public float y;
 		public int type;
-		// TODO Spine
-		public transient Array<Renderer.PreProcessor> preProcessors = new Array<Renderer.PreProcessor>();
 	}
 
 	public static class Renderer extends BaseEntitySystem {
@@ -327,11 +308,10 @@ public class MyGdxGame extends ApplicationAdapter {
 		protected ComponentMapper<Renderable> mRenderable;
 		protected int nextId;
 		protected SubRenderer[] renderers;
-		protected Array<PreProcessor> preProcessors;
+
 		public Renderer () {
 			super(Aspect.all(Renderable.class));
 			renderers = new SubRenderer[16];
-			preProcessors = new Array<PreProcessor>();
 		}
 
 		@Override protected void initialize () {
@@ -344,9 +324,6 @@ public class MyGdxGame extends ApplicationAdapter {
 			for (int i = 0; i < entityIds.size(); i++) {
 				int entityId = rawIds[i];
 				Renderable renderable = mRenderable.get(entityId);
-				for (PreProcessor preProcessor : renderable.preProcessors) {
-					preProcessor.process(entityId);
-				}
 				SubRenderer renderer = renderers[renderable.type];
 				if (renderer != null) {
 					renderer.begin();
@@ -360,24 +337,6 @@ public class MyGdxGame extends ApplicationAdapter {
 			subRenderer.id(nextId);
 			renderers[nextId++] = subRenderer;
 			world.inject(subRenderer, false);
-		}
-
-		public void addPreprocessor(PreProcessor preProcessor) {
-			preProcessors.add(preProcessor);
-			preProcessors.sort();
-			world.inject(preProcessor, false);
-		}
-
-		public void register(int entityId, PreProcessor preProcessor) {
-			Renderable renderable = mRenderable.get(entityId);
-			if (!renderable.preProcessors.contains(preProcessor, true)) {
-				renderable.preProcessors.add(preProcessor);
-			}
-		}
-
-		public void unregister(int entityId, PreProcessor preProcessor) {
-			Renderable renderable = mRenderable.get(entityId);
-			renderable.preProcessors.removeValue(preProcessor, true);
 		}
 
 		public static abstract class SubRenderer {
@@ -395,16 +354,6 @@ public class MyGdxGame extends ApplicationAdapter {
 				return id;
 			}
 		}
-
-		public static abstract class PreProcessor implements Comparable<PreProcessor> {
-			public abstract boolean accept(int entityId);
-			public abstract void process(int entityId);
-			public abstract int priority();
-
-			@Override public int compareTo (PreProcessor o) {
-				return priority()-o.priority();
-			}
-		}
 	}
 
 	public static class RegionRenderer extends Renderer.SubRenderer {
@@ -420,8 +369,8 @@ public class MyGdxGame extends ApplicationAdapter {
 			Renderable renderable = mRenderable.get(entityId);
 			Region rc = mRegion.get(entityId);
 			if (rc == null) return;
-			TextureRegion region = rc.region;
-			Gdx.app.log(TAG, "Render region " + entityId);
+			TextureRegion region = rc.diffuse;
+			Gdx.app.log(TAG, "Render diffuse " + entityId);
 
 			batch.draw(region, renderable.x, renderable.y, region.getRegionWidth() * .5f, region.getRegionHeight() * .5f);
 		}

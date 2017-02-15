@@ -5,7 +5,9 @@ package com.artemis;
  */
 public class ArtemisUtils {
 	public static World world;
-	public static <T extends Component> void addComponent(int entityId, T component) {
+
+	@SuppressWarnings("unchecked")
+	public static <T extends Component> void setComponent (int entityId, T component) {
 		ComponentMapper<T> mapper = (ComponentMapper<T>)world.getMapper(component.getClass());
 		if (!mapper.has(entityId)) mapper.create(entityId);
 		mapper.components.unsafeSet(entityId, component);
